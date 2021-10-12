@@ -1,0 +1,120 @@
+###########################
+# ADBE CF Resources Template:
+###########################
+
+# IAM: Daily Revenue Resource IAM 
+Resources:
+  ADBEProcessDailyRevenueLBDRole:
+    Properties:
+      RoleName: "ADBEProcessDailyRevenueLBDRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com, glue.amazonaws.com]
+        Version: '2012-10-17'
+    Type: AWS::IAM::Role
+
+# Lambda: Daily Revenue Data Lambda
+  ADBEProcessDailyRevenueLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "ADBEProcessDailyRevenueLambda"
+      Code:
+        S3Bucket: "glue-scripts-adb"
+        S3Key: "ProcessDailyRevenueLambda.zip"
+      Handler: "ProcessDailyRevenueLambda.lambda_handler"
+      MemorySize: 3000
+      Role:
+        Fn::GetAtt: [ADBEProcessDailyRevenueLBDRole, Arn]
+      Runtime: python3.6
+      Timeout: 900
+      Environment:
+        Variables:
+          daily_revenue_crawler: "daily-revenue-crawler"
+          dst_s3_bucket: "daily-revenue-bucket-transformed"
+          glueJobName: "ADBEProcessDailyRevenueGlueJob"
+          glueJobregion: "us-east-1"
+          is_backfill: "0"
+          src_s3_bucket: "daily-revenue-bucket"
+    
+# Triggering permissions: 
+  ADBEProcessDailyRevenueLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ADBEProcessDailyRevenueLambda
+      Principal: s3.amazonaws.com
+      SourceArn: "arn:aws:s3:::daily-revenue-bucket"
+      SourceAccount: 
+
+# Glue Crawler: Daily Revenue Data Crawler
+  ADBEProcessDailyRevenueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: ADBEdaily-revenue-crawler
+      Role: !Ref ADBEProcessDailyRevenueLBDRole
+      DatabaseName: default
+      Schedule:
+        ScheduleExpression: "cron(0 0 ? * 1 *)"
+      Targets:
+        S3Targets:
+         - Path: s3://daily-revenue-bucket-transformed
+      Configuration: "{\"Version\": 1.0,\"CrawlerOutput\": {\"Tables\": {\"AddOrUpdateBehavior\": \"MergeNewColumns\" }}}"
+      SchemaChangePolicy:
+        UpdateBehavior: "LOG"
+        DeleteBehavior: "LOG"
+
+  # Glue job: Daily Revenue Glue Job
+  ADBEProcessDailyRevenueGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: ADBEProcessDailyRevenueGlueJob
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: {Fn::Sub: "s3://glue-scripts-adb/ProcessDailyRevenueGlueJob.py"}
+      GlueVersion: "2.0"    
+      DefaultArguments:
+        "--job-language": python
+        "--enable-metrics": true
+        "--TempDir": {Fn::Sub: "s3://glue-scripts-adb/tempDir/ProcessDailyRevenueGlueJob"}
+        "--job-bookmark-option": job-bookmark-disable
+        "--daily_revenue_crawler": "daily-revenue-crawler"
+        "--enddate_YYYY_mm_dd": "2021-10-04"
+        "--startdate_YYYY_mm_dd": "2021-10-04"
+        "--enable-glue-datacatalog": true
+        "--is_backfill": "0"        
+        "--src_s3_bucket": "daily-revenue-bucket"
+        "--dst_s3_bucket": "daily-revenue-bucket-transformed"
+      ExecutionProperty:
+        MaxConcurrentRuns: 3
+      MaxRetries: 0
+      NumberOfWorkers: 10
+      WorkerType: "G.2X"
+      Timeout: 50
+      Role: !Ref ADBEProcessDailyRevenueLBDRole
+
+  # If Daily Revenue lambda fails, alarms notification will be set.  
+  ADBEProcessDailyRevenueLambdaAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: "ADBEProcessDailyRevenueLambdaAlarm"
+      AlarmDescription: "Alarm if ADBE_ProcessDailyRevenueLambda errors out at least once"
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ADBEProcessDailyRevenueLambda
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+
