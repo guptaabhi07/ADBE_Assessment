@@ -40,6 +40,11 @@ To test everything, after the pipeline has successfully completed it's first run
 
 ![Pipeline Deployment](https://github.com/guptaabhi07/ADBE_Assessment/blob/main/aws_images/CodePipeline.png "Pipeline Deployment")
 
+## Dashboard
+
+Once you haverun the pipeline successfully, you should be able to see the analysis for the daily Revenue based on Host and Keyword Search on the QuickSight in below fashion manner, depending how and what type of analysis you have done.
+
+![QuickSight Dashboard](https://github.com/guptaabhi07/ADBE_Assessment/blob/main/aws_images/QuickSight%20Analysis.png "Analysis")
 
 ## How to update the pipeline
 
